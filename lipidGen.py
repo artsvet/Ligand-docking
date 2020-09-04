@@ -17,15 +17,6 @@ plPatterns = {
     'cm':'(C(CO)N'
     }
 
-def writeFile(mol_in, format, f_out):
-
-    if type(mol_in) is not list:
-    mol_in = [mol_in]
-    writer = pybel.Outputfile(format, f_out)
-
-    for molecule in mol_in:
-        writer.write(molecule)
-        writer.close()
 
 class Mol():
 
@@ -41,14 +32,31 @@ class Mol():
     def toPybel(self):
         return pybel.readstring('smi', self.__str__())
 
+    def write3dPdb(self):
+            target = os.path.join(
+                os.getcwd(), self.type
+            )
+
+            os.makedirs(os.path.basename(target), exist_ok=True)
+            os.chdir(target)
+            x = self.toChem()
+            x = Chem.AddHs(x)
+            AllChem.EmbedMolecule(x, AllChem.ETKDG())
+            AllChem.UFFOptimizeMolecule(x, 1000)
+            AllChem.MolToPDBFile(x, self.name + '.pdb')
+
 class Lipid(Mol):
 
     def __init__(self, len, E=[], Z=[], acid=True):
+        self.name = str(len) + 'E' + str(E) + 'Z' + str(Z)
         self.len = len
         self.E = E
         self.Z = Z
         self.acid = acid
-
+        if self.acid:
+            self.type = 'fatty acid'
+        else:
+            self.type = 'lipid'
     def construct(self):
         chain = 'C' * self.len
 
@@ -76,6 +84,7 @@ class LeaFactory(Mol):
     Parametrizes LEA structure generation
     '''
     def __init__(self, r1):
+        self.type = 'LEA'
         self.r1 = r1.__str__().replace('(=O)O','')
 
     def __str__(self):
@@ -83,24 +92,25 @@ class LeaFactory(Mol):
 
 class PlFactory(Mol):
 
-    def __init__(self, name, r1='', r2=''):
-        self.name = name
+    def __init__(self, pattern, r1='', r2=''):
+        self.type = 'phospholipid'
+        self.pattern = pattern
         self.r1 = r1.__str__()
         self.r2 = r2.__str__()[::-1].replace('O)O=(C', 'C(=O)')
 
 
     def construct(self):
-        if self.name == 'sm' or self.name == 'cm':
+        if self.pattern == 'sm' or self.pattern == 'cm':
             self.r1 = 'CCCCCCCCCCCCCC=CC'
             return str(self.r1
-                       + plPatterns[self.name]
+                       + plPatterns[self.pattern]
                        + self.r2
                        + ')O'
                        )
 
         else:
             return str(self.r1
-                       + plPatterns[self.name]
+                       + plPatterns[self.pattern]
                        + self.r2
                        )
 
@@ -110,15 +120,17 @@ class PlFactory(Mol):
 class LipidFromSeries(Lipid):
 
     def __init__(self, series):
-        print(series)
         self.name = series['id']
         self.len = series['length']
         self.E = [int(E)
                   for E in series['E'].split(',')
                   if E != ''
                   ]
-        self.Z = [int(Z) for Z in series['Z'].split(',') if Z != '']
-        self.acid=True
+        self.Z = [int(Z)
+                  for Z in series['Z'].split(',')
+                  if Z != ''
+                  ]
+        self.acid = True
 
 class LeaFromSeries(LeaFactory):
 
@@ -128,8 +140,9 @@ class LeaFromSeries(LeaFactory):
         super().__init__(self.r1)
 
 class PlFromSeries(PlFactory):
-    def __init__(self, name, series, lipidTable):
-        self.name = name
+    def __init__(self, pattern, series, lipidTable):
+        self.pattern = pattern
+        self.name = pattern + ' ' + series['id']
         self.r1 = LipidFromSeries(
             lipidTable.loc[
                 lipidTable['id'] == series['r1']
@@ -143,7 +156,7 @@ class PlFromSeries(PlFactory):
                 ).__str__()[::-1].replace('O)O=(C', 'C(=O)')
         else:
             self.r2 = ''
-        super().__init__(self.name, self.r1, self.r2)
+        super().__init__(self.pattern, self.r1, self.r2)
 
 class targetsParse:
     def __init__(self, targetsSeries, lipidTable, plTable):
@@ -154,7 +167,7 @@ class targetsParse:
         self.type = targetsSeries['type']
         self.species = targetsSeries['species']
         self.function = targetsSeries['function']
-        self.ligands = re.split(':|,',targetsSeries['lipid'])
+        self.ligands = re.split(':|,', targetsSeries['lipid'])
         self.ligandsIndexes = self.ligands[1:]
 
     def buildLeaDict(self):
@@ -167,12 +180,12 @@ class targetsParse:
         ligandDict = {}
 
         if self.ligands[0] == 'all':
-            ligandNames = [key for key in plPatterns]
+            ligandPatterns = [key for key in plPatterns]
         else:
-            ligandNames = [self.ligands[0]]
+            ligandPatterns = [self.ligands[0]]
 
         if self.ligandsIndexes:
-            if ligandNames == 'lipid':
+            if ligandPatterns == 'lipid':
                 lipidSeries = [self.lipidTable.iloc[i] for i in self.ligandsIndexes]
             else:
                 plSeries = [self.plTable.iloc[i] for i in self.ligandsIndexes]
@@ -180,30 +193,32 @@ class targetsParse:
         else:
             plSeries = [series for index, series in self.plTable.iterrows()]
 
-        for name in ligandNames:
-            if name == 'lipid':
+        for pattern in ligandPatterns:
+            if pattern == 'lipid':
                 for series in lipidSeries:
                     ligandDict[self.lipidTable['id']] = LipidFromSeries(series)
             else:
                 for series in plSeries:
-                    ligandDict[name + ' ' + series['id']] = PlFromSeries(
-                    name, series, self.lipidTable
+                    ligandDict[pattern + ' ' + series['id']] = PlFromSeries(
+                    pattern, series, self.lipidTable
                 )
 
         return ligandDict
 
-    def compileLigands(self):
-        ligands = self.buildLeaDict(self.lipidTable) + self.buildLigandDict(
-            self.lipidTable, self.plTable
-        )
-        return ligands
-
-    def convertLigands(self):
-        for key in (x := self.compileLigands()):
-            x[key] = x[key].toPybel()
+    def writePdbs(self):
+        compiledLigands = {**self.buildLeaDict(), **self.buildLigandDict()}
+        root = os.getcwd()
+        pdbDir = os.path.join(
+                root, self.name, self.id
+            )
+        os.makedirs(pdbDir)
+        os.chdir(pdbDir)
+        for ligand in compiledLigands:
+            compiledLigands[ligand].write3dPdb()
+            os.chdir(pdbDir)
+        os.chdir(root)
 
 
 targets = pd.read_csv(str(os.getcwd() + '\\targetsTable.csv')).fillna('')
-lipid = pd.read_csv(str(os.getcwd() + '\\ligands\\lipid.csv')).fillna('')
-phospholipid = pd.read_csv(str(os.getcwd() + '\\ligands\\phospholipid.csv')).fillna('')
-selected = pd.read_csv(str(os.getcwd() + '\\ligands\\selected.csv')).fillna('')
+lipidTable = pd.read_csv(str(os.getcwd() + '\\ligands\\lipid.csv')).fillna('')
+plTable = pd.read_csv(str(os.getcwd() + '\\ligands\\phospholipid.csv')).fillna('')
