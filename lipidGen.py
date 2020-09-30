@@ -240,7 +240,7 @@ class Pl(Mol):
         self.r2 = r2
         self.name = pattern \
                     + self.r1.name \
-                    + getattr(self.r2, name, default='')
+                    + getattr(self.r2, 'name', default='')
 
     def construct(self):
 
@@ -273,7 +273,6 @@ class LipidFromSeries(Lipid):
                   ]
         super().__init__(self.len, E=self.E, Z=self.Z, acid=acid)
 
-
 class LeaFromSeries(Lea):
     """
     Parses series input to
@@ -284,7 +283,6 @@ class LeaFromSeries(Lea):
         self.name = series['id']
         self.r1 = LipidFromSeries(series)
         super().__init__(self.r1)
-
 
 class PlFromSeries(Pl):
     """
@@ -308,7 +306,6 @@ class PlFromSeries(Pl):
         else:
             self.r2 = ''
         super().__init__(self.pattern, self.r1, self.r2)
-
 
 class targetsParse:
     """
