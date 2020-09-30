@@ -3,6 +3,8 @@ import re
 import pandas as pd
 import pathlib
 import threading
+from queue import Queue
+from more_itertools import consume
 from pymol import cmd
 from openbabel import pybel
 from rdkit import Chem
@@ -240,7 +242,7 @@ class Pl(Mol):
         self.r2 = r2
         self.name = pattern \
                     + self.r1.name \
-                    + getattr(self.r2, 'name', default='')
+                    + getattr(self.r2, 'name', '')
 
     def construct(self):
 
@@ -250,7 +252,7 @@ class Pl(Mol):
                 'O)O=(C', 'C(=O)'
             )
 
-        if pattern == 'sm' or self.pattern == 'cm':
+        if self.pattern == 'sm' or self.pattern == 'cm':
             structure = structure + ')O'
 
         return structure
