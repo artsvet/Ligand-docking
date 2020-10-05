@@ -89,6 +89,8 @@ class Protein(type(pathlib.Path())):
                         f.write(line)
                 f.close()
 
+        return self.path_clean
+
     def convert(self):
 
         if '.pdbqt' in self.suffixes:
@@ -106,6 +108,8 @@ class Protein(type(pathlib.Path())):
             for molecule in mols:
                 writer.write(molecule)
                 writer.close()
+
+        return self.path_pdbqt
 
     def prepare(self):
 
