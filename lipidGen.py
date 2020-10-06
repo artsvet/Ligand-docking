@@ -3,6 +3,7 @@ import re
 import pandas as pd
 import pathlib
 import threading
+import multiprocessing
 from queue import Queue
 from more_itertools import consume
 from pymol import cmd
@@ -12,11 +13,11 @@ from rdkit.Chem import AllChem
 from rdkit.Chem import Draw
 
 
-class SafeThreads:
+class Multiprocess:
     """
-    Performs parallel thread-safe execution
+    Performs parallel multiprocess execution
     of a function using a Semaphore
-    on a list of arguments consumed to a Queue,
+    on arguments consumed to a Queue,
     for cleaning and conversion of Protein files.
     """
 
@@ -24,25 +25,23 @@ class SafeThreads:
         self.function = function
         self.sema = threading.BoundedSemaphore(sema_buffer)
         self.q = Queue(maxsize=q_size)
-        self.threads = []
 
     def wrap(self, arg):
         self.sema.acquire()
-        print('In worker thread: ',
+        print('In worker process: ',
               "\n", arg,
-              "\n", threading.current_thread()
+              "\n", multiprocessing.current_process()
         )
         self.function(arg)
+        print('done working: ', multiprocessing.current_process())
         self.sema.release()
-        print('done working: ', threading.current_thread())
 
     def __call__(self, *args, **kwargs):
         consume(self.q.put(arg) for arg in args)
         with self.sema:
             while self.q.qsize() > 0:
-                t = threading.Thread(target=self.wrap, args=(self.q.get(),))
-                t.start()
-                self.threads = threading.enumerate()
+                p = multiprocessing.Process(target=self.wrap, args=(self.q.get(),))
+                p.start()
 
 
 PL_PATTERNS = {
@@ -63,8 +62,8 @@ class Protein(type(pathlib.Path())):
     Protein class instantiated using path
     to .pdb, .pdbqt, or other structure file.
     Implements methods to clean and convert
-    structure files, with thread-safe parallel
-    execution if used with SafeThreads.
+    structure files, with parallel
+    execution when used with Multiprocess.
     """
 
     def __init__(self, path):
@@ -81,6 +80,7 @@ class Protein(type(pathlib.Path())):
                     self.stem + '.clean' + self.suffix
                 )
             )
+            setattr(self.path_clean, 'path_clean', self.path_clean)
             with open(self, "r") as f:
                 lines = f.readlines()
             with open(self.path_clean, "w") as f:
@@ -97,6 +97,7 @@ class Protein(type(pathlib.Path())):
             return self
         else:
             self.path_pdbqt = Protein(self.with_suffix('.pdbqt'))
+            setattr(self.path_pdbqt, 'path_pdbqt', self.path_pdbqt)
             cmd.load(self.__str__())
             cmd.remove('resn HOH')
             cmd.h_add(selection='acceptors or donors')
