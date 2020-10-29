@@ -3,8 +3,8 @@ import re
 import pandas as pd
 import pathlib
 import threading
-import multiprocessing
-from queue import Queue
+import subprocess
+from multiprocessing import Process, Queue, current_process
 from more_itertools import consume
 from pymol import cmd
 from openbabel import pybel
@@ -30,19 +30,77 @@ class Multiprocess:
         self.sema.acquire()
         print('In worker process: ',
               "\n", arg,
-              "\n", multiprocessing.current_process()
+              "\n", current_process()
         )
         self.function(arg)
-        print('done working: ', multiprocessing.current_process())
+        print('done working: ', current_process())
         self.sema.release()
 
     def __call__(self, *args, **kwargs):
         consume(self.q.put(arg) for arg in args)
         with self.sema:
             while self.q.qsize() > 0:
-                p = multiprocessing.Process(target=self.wrap, args=(self.q.get(),))
+                a = self.q.get()
+                p = Process(target=self.wrap, args=(a,))
                 p.start()
 
+class Docker:
+
+    def __init__(self, receptor, ligand, log_path,
+                 box=(0,0,0,30,30,30), exhaustiveness=10, run_count=1):
+        self.receptor = receptor
+        self.ligand = ligand
+        self.box = box
+        self.log = log_path
+        self.exhaustiveness = exhaustiveness
+        self.run_count = run_count
+
+    def dock_args(self):
+
+        return 'vina --receptor {0} --ligand {1} ' \
+               '--center_x {2} --center_y {3} --center_z {4} ' \
+               '--size_x {5} --size_y {6} --size_z {7}' \
+               ' --log {8} --exhaustiveness {9} '.format(
+                    self.receptor, self.ligand.pdbqt_path,
+                    self.box[0], self.box[1], self.box[2],
+                    self.box[3], self.box[4], self.box[5],
+                    self.log, self.exhaustiveness,
+                )
+
+    def dock(self, run_number=1):
+
+        self.ligand.write_pdbqt()
+        r = subprocess.run(
+            self.dock_args(), shell=True
+        )
+        list_out = []
+        os.remove(self.ligand.pdbqt_path)
+        delattr(self.ligand, 'pdbqt_path')
+        with open(self.log, 'r') as log:
+            for line in log:
+                m = re.match(
+                    r'(\d)\s*(-\d*.\d*)\s*(\d*.\d*)\s*(\d*.\d*)',
+                    line.lstrip()
+                )
+                if m:
+                    list_out.append({'Receptor': self.receptor.stem,
+                                     'Ligand': self.ligand,
+                                     'Run number': run_number,
+                                     'Rank': m.group(1),
+                                     'Affinty': m.group(2),
+                                     'Dist rmsd l.b.': m.group(3),
+                                     'Dist rmsd u.b.': m.group(4)})
+        return pd.DataFrame(list_out)
+
+    def run(self):
+
+        times_ran = 0
+        run_outputs = []
+        while times_ran < self.run_count:
+            run_outputs.append(self.dock())
+            times_ran += 1
+
+        return pd.concat(run_outputs)
 
 PL_PATTERNS = {
     # template pattern for phospholipid molecule classes
@@ -69,11 +127,11 @@ class Protein(type(pathlib.Path())):
     def __init__(self, path):
 
         super().__init__()
-        
+
     def clean(self):
 
-        if '.clean' in self.suffixes:
-            return self
+        if hasattr(self, 'path_clean'):
+            return self.path_clean
         else:
             self.path_clean = Protein(
                 self.with_name(
@@ -93,8 +151,8 @@ class Protein(type(pathlib.Path())):
 
     def convert(self):
 
-        if '.pdbqt' in self.suffixes:
-            return self
+        if hasattr(self, 'path_pdbqt'):
+            return self.path_pdbqt
         else:
             self.path_pdbqt = Protein(self.with_suffix('.pdbqt'))
             setattr(self.path_pdbqt, 'path_pdbqt', self.path_pdbqt)
@@ -109,6 +167,7 @@ class Protein(type(pathlib.Path())):
             for molecule in mols:
                 writer.write(molecule)
                 writer.close()
+            cmd.reinitialize()
 
         return self.path_pdbqt
 
@@ -121,6 +180,10 @@ class Protein(type(pathlib.Path())):
         else:
             self.clean().convert().clean()
 
+    def __repr__(self):
+
+        return self.root
+
 class Mol:
     """
     Base class for ligand molecules,
@@ -129,6 +192,8 @@ class Mol:
     Openbabel to generate, convert,
     and display molecules.
     """
+    def __init__(self, smiles):
+        self.smiles = smiles
 
     def to_chem(self):
 
@@ -146,18 +211,51 @@ class Mol:
 
         return pybel.readstring('smi', self.__str__())
 
-    def write_pdb(self):
+    def write_pdb(self, make_dir=False):
 
+        if make_dir:
             target = os.path.join(
                 os.getcwd(), self.type
             )
             os.makedirs(os.path.basename(target), exist_ok=True)
             os.chdir(target)
-            x = self.to_chem()
-            x = Chem.AddHs(x)
-            AllChem.EmbedMolecule(x, AllChem.ETKDG())
-            AllChem.UFFOptimizeMolecule(x, 1000)
-            AllChem.MolToPDBFile(x, self.name + '.pdb')
+        else:
+            target = os.getcwd()
+
+        x = self.to_chem()
+        x = Chem.AddHs(x)
+        AllChem.EmbedMolecule(x, AllChem.ETKDG())
+        AllChem.UFFOptimizeMolecule(x, 1000)
+        AllChem.MolToPDBFile(x, self.name + '.pdb')
+        self.pdb_path = pathlib.Path(os.path.join(target, self.name + '.pdb'))
+
+        return self.pdb_path
+
+    def write_pdbqt(self):
+
+        if hasattr(self, 'pdb_path'):
+            pass
+        else:
+            self.write_pdb()
+
+        self.pdbqt_path = self.pdb_path.with_suffix('.pdbqt')
+        mols = list(pybel.readfile('pdb', self.pdb_path.__str__()))
+        writer = pybel.Outputfile(
+            'pdbqt', self.pdbqt_path.__str__(),
+            opt={'pdbqt': '-xh'}, overwrite=True
+        )
+        for molecule in mols:
+            writer.write(molecule)
+            writer.close()
+        os.remove(self.pdb_path.__str__())
+        delattr(self, 'pdb_path')
+        cmd.reinitialize()
+
+        return self.pdbqt_path
+
+    def construct(self):
+
+        return self.smiles
 
     def __str__(self):
 
@@ -185,8 +283,8 @@ class Lipid(Mol):
         else:
             self.type = 'lipid'
         self.name = str(self.len) \
-                    + 'E' + str(self.E) \
-                    + 'Z' + str(self.Z)
+                    + 'E' + ''.join([str(i) for i in self.E]) \
+                    + 'Z' + ''.join([str(i) for i in self.Z])
 
     def construct(self):
 
@@ -208,6 +306,9 @@ class Lipid(Mol):
         else:
             return chain[::-1]
 
+    def __len__(self):
+        return self.len
+
 class Lea(Mol):
     """
     Synthetic Lea drug class,
@@ -226,6 +327,9 @@ class Lea(Mol):
 
         return self.r1.__str__().replace('(=O)O','') \
             + 'OCC(CNC(C)C)O'
+
+    def __len__(self):
+        return self.r1.__len__()
 
 class Pl(Mol):
     """
@@ -261,6 +365,12 @@ class Pl(Mol):
             structure = structure + ')O'
 
         return structure
+
+    def __len(self):
+        if self.r2:
+            return self.r1.__len__(), self.r2.__len__()
+        else:
+            return self.r1.__len__()
 
 class LipidFromSeries(Lipid):
     """
@@ -328,22 +438,23 @@ class targetsParse:
         self.lipidTable = lipidTable
         self.plTable = plTable
         self.id = targetsSeries['id']
+        self.pdb = Protein(targetsSeries['pdb'])
         self.name = targetsSeries['name']
         self.type = targetsSeries['type']
         self.species = targetsSeries['species']
         self.function = targetsSeries['function']
         self.ligands = re.split(':|,', targetsSeries['lipid'])
-        self.ligandsIndexes = self.ligands[1:]
-        self.box = targetsSeries['box']
+        self.ligandsIndexes = [int(i) for i in self.ligands[1:]]
+        self.box = eval(targetsSeries['box'])
 
-    def build_lea_dict(self):
-        leaDict = {}
+    def build_lea_list(self):
+        leaList = []
         for index, series in self.lipidTable.iterrows():
-            leaDict[series['id']] = LeaFromSeries(series)
-        return leaDict
+            leaList.append(LeaFromSeries(series))
+        return leaList
 
-    def build_ligand_dict(self):
-        ligandDict = {}
+    def build_ligand_list(self):
+        ligandList = []
 
         if self.ligands[0] == 'all':
             ligandPatterns = [key for key in PL_PATTERNS]
@@ -362,17 +473,17 @@ class targetsParse:
         for pattern in ligandPatterns:
             if pattern == 'lipid':
                 for series in lipidSeries:
-                    ligandDict[self.lipidTable['id']] = LipidFromSeries(series)
+                    ligandList.append(LipidFromSeries(series))
             else:
                 for series in plSeries:
-                    ligandDict[pattern + ' ' + series['id']] = PlFromSeries(
+                    ligandList.append(PlFromSeries(
                     pattern, series, self.lipidTable
-                )
+                ))
 
-        return ligandDict
+        return ligandList
 
     def write_ligands(self):
-        ligands = {**self.build_lea_dict(), **self.build_ligand_dict()}
+        ligands = self.build_lea_list() + self.build_ligand_list()
         root = os.getcwd()
         dir = os.path.join(
                 root, self.name, self.id
@@ -384,7 +495,26 @@ class targetsParse:
             os.chdir(dir)
         os.chdir(root)
 
+    def dock(self, ligands, run_count=1, exhaustiveness=10):
+        outputs = []
+        for mol in ligands:
+            outputs.append(
+                Docker(receptor=self.pdb,
+                ligand=mol,
+                log_path=mol.name + '_log.txt',
+                box=self.box, run_count=run_count,
+                exhaustiveness=exhaustiveness).run())
+        return outputs
+
 
 targets = pd.read_csv(str(os.getcwd() + '\\targetsTable.csv')).fillna('')
 lipidTable = pd.read_csv(str(os.getcwd() + '\\ligands\\lipid.csv')).fillna('')
 plTable = pd.read_csv(str(os.getcwd() + '\\ligands\\phospholipid.csv')).fillna('')
+
+for index, row in targets.iterrows():
+
+    if row['box'] != '':
+        target = targetsParse(row, lipidTable, plTable)
+        to_dock = [target.build_ligand_list(), target.build_lea_list()]
+        testTables = testParse.dock(to_dock, run_count=3, exhaustiveness=10)
+
