@@ -1,5 +1,5 @@
-import os
 import re
+import os
 import pandas as pd
 import pathlib
 import threading
@@ -110,7 +110,7 @@ PL_PATTERNS = {
     'pg':'CC(COP(=O)(O)OCC(CO)O)O',
     'pi':'CC(COP(=O)(O)OC1C(C(C(C(C1O)O)O)O)O)O',
     'ps':'CC(COP(=O)(O)OCC(C(=O)O)N)O',
-    'sm':'(C(COP(=O)([O-])OCC[N+](C)(C)C)N',
+    'sm':'NC(COP(=O)(O)OCC[N+](C)(C)C)',
     'cm':'(C(CO)N'
     }
 
@@ -340,15 +340,16 @@ class Pl(Mol):
 
     def __init__(self, pattern, r1='', r2=''):
         self.pattern = pattern
-        if r2:
+        self.r1 = r1
+        self.r2 = r2
+        if r2 == '':
             self.type = 'phospholipid'
         else:
             self.type = 'lysoPl'
         if self.pattern == 'sm' or self.pattern == 'cm':
-            self.r1 = Lipid(16, E=[2], acid=False)
-        else:
+            if self.r1 == '':
+                self.r1 = Lipid(16, E=[2], acid=False)
             self.r1 = r1
-        self.r2 = r2
         self.name = pattern \
                     + self.r1.name \
                     + getattr(self.r2, 'name', '')
@@ -362,15 +363,16 @@ class Pl(Mol):
             )
 
         if self.pattern == 'sm' or self.pattern == 'cm':
-            structure = structure + ')O'
+            structure = 'CCCCCCCCCCCCCC=CC(C(COP(=O)([O-])OCC[N+](C)(C)C)N' + ')O'
 
         return structure
 
-    def __len(self):
+    def __len__(self):
         if self.r2:
             return self.r1.__len__(), self.r2.__len__()
         else:
             return self.r1.__len__()
+
 
 class LipidFromSeries(Lipid):
     """
@@ -414,12 +416,12 @@ class PlFromSeries(Pl):
                 lipidTable['id'] == series['r1']
                 ].squeeze()
             )
-        if series['r2']:
+        if series['r2'] != '':
             self.r2 = LipidFromSeries(
                 lipidTable.loc[
                     lipidTable['id'] == series['r2']
                     ].squeeze()
-                ).__str__()[::-1].replace('O)O=(C', 'C(=O)')
+                )
         else:
             self.r2 = ''
         super().__init__(self.pattern, self.r1, self.r2)
@@ -445,6 +447,7 @@ class targetsParse:
         self.function = targetsSeries['function']
         self.ligands = re.split(':|,', targetsSeries['lipid'])
         self.ligandsIndexes = [int(i) for i in self.ligands[1:]]
+        self.selected = [int(i) for i in re.split(',', targetsSeries['selected']) if i != ',']
         self.box = eval(targetsSeries['box'])
 
     def build_lea_list(self):
@@ -458,6 +461,8 @@ class targetsParse:
 
         if self.ligands[0] == 'all':
             ligandPatterns = [key for key in PL_PATTERNS]
+        elif self.ligands[0] == '':
+            return ligandList
         else:
             ligandPatterns = [self.ligands[0]]
 
@@ -480,6 +485,14 @@ class targetsParse:
                     pattern, series, self.lipidTable
                 ))
 
+        return ligandList
+
+    def build_select_list(self):
+        ligandList = []
+        for index in self.selected:
+            ligand = Mol(selectedTable.iloc[index]['smiles'])
+            setattr(ligand, 'name', selectedTable.iloc[index]['id'])
+            ligandList.append(ligand)
         return ligandList
 
     def write_ligands(self):
@@ -510,11 +523,20 @@ class targetsParse:
 targets = pd.read_csv(str(os.getcwd() + '\\targetsTable.csv')).fillna('')
 lipidTable = pd.read_csv(str(os.getcwd() + '\\ligands\\lipid.csv')).fillna('')
 plTable = pd.read_csv(str(os.getcwd() + '\\ligands\\phospholipid.csv')).fillna('')
+selectedTable = pd.read_csv(str(os.getcwd() + '\\ligands\\selected.csv')).fillna('')
 
-for index, row in targets.iterrows():
+testTarget = targetsParse(targets.iloc[0], lipidTable, plTable)
+print(testTarget.build_lea_list(), '\n', testTarget.build_ligand_list(), '\n', testTarget.build_select_list())
+testLigands = testTarget.build_lea_list(), testTarget.build_ligand_list(), testTarget.build_select_list()
+consume(print(mol.to_chem()) for mol in testLigands)
+
+
+for index, row in targets.iloc[2].iterrows():
 
     if row['box'] != '':
         target = targetsParse(row, lipidTable, plTable)
-        to_dock = [target.build_ligand_list(), target.build_lea_list()]
-        testTables = testParse.dock(to_dock, run_count=3, exhaustiveness=10)
+        to_dock = target.build_ligand_list() + target.build_lea_list() + target.build_select_list()
+        testTables = target.dock(to_dock, run_count=3, exhaustiveness=10)
+        outputs_path = os.getcwd() + '\\' + row['name'] + '_' + row['id'] + '_outputs.csv'
+        pd.concat.testTables.to_csv(outputs_path)
 
