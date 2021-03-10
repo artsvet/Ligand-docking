@@ -46,6 +46,7 @@ class Multiprocess:
                 p = Process(target=self.wrap, args=(a,))
                 p.start()
 
+
 class Docker:
 
     def __init__(self, receptor, ligand, log_path,
