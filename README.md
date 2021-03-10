@@ -8,5 +8,3 @@ arbitrary branches to generate several types of chemical data. They provide an
 API to computational chemistry libraries for visualizing, formating, or exporting 
 for further use in computations simulation.
 
-Further development will connect the target input tables end-to-end with Autodock
-Vina simulation instances, outputs, and analysis.
