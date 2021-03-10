@@ -1,70 +1,101 @@
-import subprocess
-import re
-import pandas as pd
-
-R = 'C:\\Users\\starch\\PycharmProjects\\molDocking\\testDock1019\\5lia.pdbqt'
-L = 'C:\\Users\\starch\\PycharmProjects\\molDocking\\testDock1019\\LPA.pdbqt'
-W = 'C:\\Users\\starch\\PycharmProjects\\molDocking\\testDock1019\\LPA_log.txt'
-B = (-42, 24, -14, 30, 30, 30)
-
-
-class docker:
-
-    def __init__(self, receptor, ligand, log,
-                 box=(0,0,0,30,30,30), exhaustiveness=10, run_count=1):
-        self.receptor = receptor
-        self.ligand = ligand
-        self.box = box
-        self.log = log
-        self.exhaustiveness = exhaustiveness
-        self.run_count = run_count
-
-    def dock_args(self):
-
-        return 'vina --receptor {0} --ligand {1} ' \
-               '--center_x {2} --center_y {3} --center_z {4} ' \
-               '--size_x {5} --size_y {6} --size_z {7}' \
-               ' --exhaustiveness {8} --log {9}'.format(
-                    self.receptor.__str__(), self.ligand.__str__(),
-                    self.box[0], self.box[1], self.box[2],
-                    self.box[3], self.box[4], self.box[5],
-                    self.exhaustiveness, self.log.__str__()
-                )
-
-    def dock(self, run_number):
-
-        r = subprocess.run(
-            self.dock_args(), shell=True
-        )
-        list_out = []
-        with open(W, 'r') as log:
-            for line in log:
-                m = re.match(
-                    r'(\d)\s*(-\d*.\d*)\s*(\d*.\d*)\s*(\d*.\d*)',
-                    line.lstrip()
-                )
-                if m:
-                    list_out.append({'Receptor': self.receptor.name,
-                                     'Ligand': self.ligand.name,
-                                     'Run number': run_number,
-                                     'Rank': m.group(1),
-                                     'Affinty': m.group(2),
-                                     'Dist rmsd l.b.': m.group(3),
-                                     'Dist rmsd u.b.': m.group(4)})
-        return pd.DataFrame(list_out)
-
-    def run(self):
-
-        times_ran = 0
-        run_outputs = []
-        while times_ran < self.run_count:
-            times_ran += 1
-            run_outputs.append(self.dock(run_number=times_ran))
-
-
-        return pd.concat(run_outputs)
-
-
-
-print(docker(R, L, W, B, exhaustiveness=3, run_count=3).run())
-
+>>> class targetsParse:
+...     """
+...     Parses Series to set up dependencies for ligand
+...     docking. Contains Protein target attributes,
+...     specifies ligands that will be docked using
+...     reference lipid and pl tables. Will serve as
+...     primary interface for running dock and
+...     collecting outputs.
+...     """
+... 
+...     def __init__(self, targetsSeries, lipidTable, plTable, selectTable):
+...         self.lipidTable = lipidTable
+...         self.plTable = plTable
+...         self.selectTable = selectTable
+...         self.id = targetsSeries['id']
+...         self.pdb = Protein(targetsSeries['pdb'])
+...         self.name = targetsSeries['name']
+...         self.type = targetsSeries['type']
+...         self.species = targetsSeries['species']
+...         self.function = targetsSeries['function']
+...         self.ligands = re.split(':|,', targetsSeries['lipid'])
+...         self.ligandsIndexes = [int(i) for i in self.ligands[1:]]
+...         self.selected = [
+...             int(i) for i in re.split(',', targetsSeries['selected'])
+...             if i not in [',', '']
+...         ]
+...         self.box = eval(targetsSeries['box'])
+... 
+...     def build_lea_list(self):
+...         lea_list = []
+...         for index, series in self.lipidTable.iterrows():
+...             lea_list.append(LeaFromSeries(series))
+...         return lea_list
+... 
+...     def build_ligand_list(self):
+...         ligandList = []
+... 
+...         if self.ligands[0] == 'all':
+...             ligandPatterns = [key for key in PL_PATTERNS]
+...         elif self.ligands[0] == '':
+...             return ligandList
+...         else:
+...             ligandPatterns = [self.ligands[0]]
+... 
+...         if self.ligandsIndexes:
+...             if ligandPatterns == 'lipid':
+...                 lipidSeries = [
+...                     self.lipidTable.iloc[i] for i in self.ligandsIndexes
+...                 ]
+...             else:
+...                 plSeries = [self.plTable.iloc[i] for i in self.ligandsIndexes]
+... 
+...         else:
+...             plSeries = [series for index, series in self.plTable.iterrows()]
+... 
+...         for pattern in ligandPatterns:
+...             if pattern == 'lipid':
+...                 for series in lipidSeries:
+...                     ligandList.append(LipidFromSeries(series))
+...             else:
+...                 for series in plSeries:
+...                     ligandList.append(PlFromSeries(
+...                         pattern, series, self.lipidTable
+...                     ))
+... 
+...         return ligandList
+... 
+...     def build_select_list(self):
+...         ligandList = []
+...         for index in self.selected:
+...             ligand = Mol(self.selectTable.iloc[index]['smiles'])
+...             setattr(ligand, 'name', selectedTable.iloc[index]['id'])
+...             ligandList.append(ligand)
+...         return ligandList
+... 
+...     def write_ligands(self):
+...         ligands = self.build_lea_list() + self.build_ligand_list() + self.build_select_list()
+...         root = os.getcwd()
+...         dir = os.path.join(
+...             root, self.name, self.id
+...         )
+...         os.makedirs(dir)
+...         os.chdir(dir)
+...         for mol in ligands:
+...             mol.write_pdb()
+...             os.chdir(dir)
+...         os.chdir(root)
+... 
+...     def dock(self, ligands, run_count=1, exhaustiveness=10, write_dir=os.getcwd()):
+...         outputs = []
+...         for mol in ligands:
+...             outputs.append(
+...                 Docker(receptor=self.pdb,
+...                        ligand=mol,
+...                        log_path=self.id + '_' + mol.name + '_log.txt',
+...                        box=self.box, run_count=run_count,
+...                        exhaustiveness=exhaustiveness).run())
+...             pd.concat(outputs).to_csv(write_dir + '\\' + self.name
+...                                       + '_' + self.id + '_outputs.csv')
+... 
+...         return outputs
