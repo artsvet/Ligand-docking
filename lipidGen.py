@@ -17,6 +17,9 @@ from rdkit.Chem import AllChem
 from rdkit.Chem import Draw
 from rdkit.Chem import rdPartialCharges
 
+'''
+TODO: Jupyter notebook demo
+'''
 
 class Multiprocess:
     """
