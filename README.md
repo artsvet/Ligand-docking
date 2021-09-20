@@ -8,3 +8,5 @@ arbitrary branches to generate several types of chemical data. They provide an
 API to computational chemistry libraries for visualizing, formating, or exporting 
 for further use in computations simulation.
 
+Ligands.py and Proteins.py interface to common input formats and generate dependencies for docking.
+VinaDock.py runs Autodock VINA using DockParser.py to batch docking using a table I/O.
