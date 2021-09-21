@@ -5,17 +5,21 @@ from datetime import datetime
 
 
 class Docker:
-
+    """
+    Autodock VINA searches for lowest binding energy conformations for
+    flexible ligand and rigid protein receptor.
+    Outputs compiled vina rankings output as pandas dataframe.
+    """
     def __init__(self, receptor, ligand, log_path,
-                 box=(0,0,0,30,30,30), exhaustiveness=10, cpu=8, run_count=1):
-        self.receptor = receptor
-        self.ligand = ligand
-        self.box = box
-        self.log = log_path
+                 box=(0, 0, 0, 30, 30, 30), exhaustiveness=10, cpu=8, run_count=1):
+        self.receptor = receptor  # prepared protein pdbqt file
+        self.ligand = ligand  # ligand to dock
+        self.box = box  # search grid
+        self.log = log_path  # vina subprocess output txt
         self.exhaustiveness = exhaustiveness
         self.cpu = cpu
-        self.run_count = run_count
-        self.times_ran = 0
+        self.run_count = run_count  # iterations
+        self.times_ran = 0  # iterations counter
 
 
     def dock_args(self):

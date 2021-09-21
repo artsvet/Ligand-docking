@@ -6,12 +6,15 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem import Draw
 from rdkit.Chem import rdPartialCharges
+from pymol import cmd
 
 '''
-TODO: Jupyter notebook demo
+The most common representation for molecules is the SMILES
+molecule format, a string of atom characters representing 
+a depth-first tree traversal of the molecular graph.
+The ligand classes are used to generate lipid molecule SMILES.
 '''
 
-R = .0019872 #kcal mol^-1 K^-1
 PL_PATTERNS = {
     # template pattern for phospholipid molecule classes
     'pa': 'CC(COP(=O)(O)O)O',
@@ -21,17 +24,6 @@ PL_PATTERNS = {
     'pi': 'CC(COP(=O)(O)OC1C(C(C(C(C1O)O)O)O)O)O',
     'ps': 'CC(COP(=O)(O)OCC(C(=O)O)N)O',
     'cm': '(C(CO)N'
-    }
-
-DEFAULT_LIGANDS = {
-    # default ligands for phospholipid molecule classes
-    'pa': ['PA'],
-    'pc': ['pc1818Z9'],
-    'pe': ['pe1820Z581114', 'pe1818Z9'],
-    'pg': ['pg1618Z9'],
-    'pi': ['pi1820Z581114'],
-    'ps': ['ps1818Z9'],
-    'sm': ['sm16', 'sm24']
     }
 
 
@@ -87,35 +79,34 @@ class Mol:
             print(err, self.name)
 
         AllChem.MolToPDBFile(x, self.name + '.pdb')
-        setattr(self, 'pdb_path', Path(
+        self.pdb_path = Path(
             os.path.join(target, self.name + '.pdb')
             )
-        )
 
         return self.pdb_path
 
     def write_pdbqt(self):
 
-        if hasattr(self, 'pdb_path'):
+        if self.pdb_path:
             pass
         else:
             self.write_pdb()
 
-        setattr(self, 'pdbqt_path', Path(
+        self.pdbqt_path = Path(
             self.pdb_path.with_suffix('.pdbqt')
             )
-        )
-
-        mols = list(pybel.readfile('pdb', self.pdb_path.__str__()))
+        atoms = list(pybel.readfile('pdb', self.pdb_path.__str__()))
         writer = pybel.Outputfile(
             'pdbqt', self.pdbqt_path.__str__(),
             opt={'pdbqt': '-xh'}, overwrite=True
         )
-        for molecule in mols:
-            writer.write(molecule)
+        for atom in atoms:
+            writer.write(atom)
             writer.close()
+
+        '''pybel/pymol cache needs manual cleanup'''
         os.remove(self.pdb_path.__str__())
-        delattr(self, 'pdb_path')
+        self.pdb_path = None
         cmd.reinitialize()
 
         return self.pdbqt_path
@@ -263,8 +254,8 @@ class Pl(Mol):
             self.type = 'phospholipid'
 
         self.name = pattern \
-                    + getattr(self.r1, 'name', '') \
-                    + getattr(self.r2, 'name', '')
+                    + self.r1.name \
+                    + self.r2.name
 
     @classmethod
     def from_series(cls, pattern, series, lipid_table):
