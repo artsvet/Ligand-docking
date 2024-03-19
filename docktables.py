@@ -15,11 +15,10 @@ class Dock_Report_Factory:
         
     def summary(self):
         targets = self.all['Receptor'].unique()
-        data = pd.DataFrame()
+        df = pd.DataFrame()
         for t in targets:
-            data = data.join(pd.concat([pd.DataFrame(data = [df.mean(), df.std()], columns = ['Mean_affinity_'+ t, 'Stdev_affinity_' + t])
-                                        for df in self.all.groupby('Ligand')['Affinity']]
-                             )
-                   )
+            df = pd.concat([pd.Series(df.groupby('Ligand')['Affinity'].mean()).rename('Mean_affinity_' + t), 
+                            pd.Series(df.groupby('Ligand')['Affinity'].std()).rename('Standard_deviation_' + t)
+                            ], axis = 1)
                   
         return data
