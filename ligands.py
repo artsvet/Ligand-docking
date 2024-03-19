@@ -27,7 +27,7 @@ PL_PATTERNS = {
     }
 
 
-class Mol:
+class Ligand:
     """
     Base class for ligand molecules,
     takes SMILES formatted string representatons
@@ -35,30 +35,44 @@ class Mol:
     Openbabel to generate, convert,
     and display molecules.
     """
-    def __init__(self, smiles, name=''):
-        self.smiles = smiles
+    def __init__(self, mol, name=''):
+        self.mol = mol
         self.name = name
         self.type = ''
         self.pdb_path = ''
         self.pdbqt_path = ''
 
-    def to_chem(self):
+    @classmethod
+    def from_sdf(cls, sdf_path):
+        path = Path(sdf_path)
+        mol = Chem.SDMolSupplier(sdf_path)[0]
+        cid = re.search(r'CID_(\d*)', sdf_path)
+        if cid:
+            name = cid[0]
+        else:
+            name = path.stem
 
-        return Chem.MolFromSmiles(self.__str__())
+        return cls(mol, name=name)
+
+    @classmethod
+    def from_smiles(cls, smiles, name=''):
+        mol = Chem.MolFromSmiles(smiles)
+
+        return cls(mol, name)
 
     def show_mol(self):
 
-        return Draw.ShowMol(Chem.MolFromSmiles(self.__str__()), size=(600, 300))
+        return Draw.ShowMol(self.mol, size=(600, 300))
 
     def to_image(self):
 
-        return Draw.MolToImage(self.__str__(), size=(600, 300))
+        return Draw.MolToImage(self.mol, size=(600, 300))
 
     def to_pybel(self):
 
         return pybel.readstring('smi', self.__str__())
 
-    def write_pdb(self, make_dir=False):
+    def write_pdb(self, make_dir=False) -> Path:
 
         if make_dir:
             target = os.path.join(
@@ -69,23 +83,22 @@ class Mol:
         else:
             target = os.getcwd()
 
-        x = self.to_chem()
-        x = Chem.AddHs(x)
-        AllChem.EmbedMolecule(x, useRandomCoords=True, boxSizeMult=3.0,
+        h = Chem.AddHs(self.mol)
+        AllChem.EmbedMolecule(h, useRandomCoords=True, boxSizeMult=3.0,
                               maxAttempts=10000)
         try:
-            AllChem.UFFOptimizeMolecule(x, 10000)
+            AllChem.UFFOptimizeMolecule(h, 10000)
         except ValueError as err:
             print(err, self.name)
 
-        AllChem.MolToPDBFile(x, self.name + '.pdb')
+        AllChem.MolToPDBFile(h, self.name + '.pdb')
         self.pdb_path = Path(
             os.path.join(target, self.name + '.pdb')
             )
 
         return self.pdb_path
 
-    def write_pdbqt(self):
+    def write_pdbqt(self) -> Path:
 
         if self.pdb_path:
             pass
@@ -108,31 +121,25 @@ class Mol:
         os.remove(self.pdb_path.__str__())
         self.pdb_path = None
         cmd.reinitialize()
-
         return self.pdbqt_path
 
-    def construct(self):
+    def compute_charges(self)-> list:
 
-        return self.smiles
-
-    def compute_charges(self):
-
-        chem = self.to_chem()
-        rdPartialCharges.ComputeGasteigerCharges(chem)
+        rdPartialCharges.ComputeGasteigerCharges(self.mol)
         charges = [(atom.GetSymbol(), atom.GetDoubleProp('_GasteigerCharge'))
-                   for atom in chem.GetAtoms()]
+                   for atom in self.mol.GetAtoms()]
         return charges
 
     def __str__(self):
 
-        return self.construct()
+        return Chem.MolToSmiles(self.mol)
 
     def __repr__(self):
 
-        return self.construct()
+        return self.name
 
 
-class Lipid(Mol):
+class Lipid(Ligand):
     """
     Lipid class, generating a string
     representation of carbon chains with variable
@@ -154,6 +161,7 @@ class Lipid(Mol):
             self.name += 'E' + ''.join([str(i) for i in self.E])
         if self.Z:
             self.name += 'Z' + ''.join([str(i) for i in self.Z])
+        self.mol = Chem.MolFromSmiles(self.construct())
 
     @classmethod
     def from_series(cls, series, acid=True):
@@ -204,7 +212,7 @@ class Lipid(Mol):
         return self.len
 
 
-class Lea(Mol):
+class Lea(Ligand):
     """
     Synthetic Lea drug class,
     generating a string representation using
@@ -217,6 +225,7 @@ class Lea(Mol):
         self.r1 = r1
         self.type = 'LEA'
         self.name = 'LEA' + self.r1.name
+        self.mol = Chem.MolFromSmiles(self.construct())
 
     @classmethod
     def from_series(cls, series):
@@ -237,7 +246,7 @@ class Lea(Mol):
         return self.r1.__len__()
 
 
-class Pl(Mol):
+class Pl(Ligand):
     """
     Phospholipid compound class,
     generating a string representation using
@@ -256,6 +265,7 @@ class Pl(Mol):
         self.name = pattern \
                     + self.r1.name \
                     + self.r2.name
+        self.mol = Chem.MolFromSmiles(self.construct())
 
     @classmethod
     def from_series(cls, pattern, series, lipid_table):
