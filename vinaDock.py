@@ -1,11 +1,13 @@
 import re
 import pandas as pd
 import subprocess
+import sys
 from pathlib import Path
 from targets import Protein
 from ligands import Ligand
 from datetime import datetime
 from time import sleep
+from typing import Dict
 
 
 class Docker:
@@ -39,11 +41,19 @@ class Docker:
 
     def dock(self):
 
+        sys.stdout.write('{0}  Docking {1} on {2}: ' \
+              'Exhaustiveness - {3}, CPU - {4}, Box - {5}'.format(
+            datetime.now(), self.ligand.name, self.receptor.name,
+            self.exhaustiveness, self.cpu, self.box))
+
         self.ligand.write_pdbqt()
         subprocess.run(
             self.dock_args(), shell=True
         )
+
         self.out = self.scrape_log()
+        sys.stdout.write('{0}  Finished docking: Top affinity - {1} \n'.format(
+            datetime.now(), self.out['Affinity'][0]))
 
         return self.out
 

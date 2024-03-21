@@ -26,7 +26,6 @@ PL_PATTERNS = {
     'cm': '(C(CO)N'
     }
 
-
 class Ligand:
     """
     Base class for ligand molecules,
@@ -35,28 +34,33 @@ class Ligand:
     Openbabel to generate, convert,
     and display molecules.
     """
-    def __init__(self, mol, name=''):
+    def __init__(self, mol, name, group = ''):
         self.mol = mol
         self.name = name
-        self.type = ''
+        self.group = group
         self.pdb_path = ''
         self.pdbqt_path = ''
 
     @classmethod
-    def from_sdf(cls, sdf_path):
+    def from_sdf(cls, sdf_path, name=''):
         path = Path(sdf_path)
-        mol = Chem.SDMolSupplier(sdf_path)[0]
-        cid = re.search(r'CID_(\d*)', sdf_path)
-        if cid:
+        mol = Chem.SDMolSupplier(path)[0]
+        if name:
+            pass        
+        elif cid := re.search(r'CID_(\d*)', path):
             name = cid[0]
         else:
             name = path.stem
 
-        return cls(mol, name=name)
+        return cls(mol, name)
 
     @classmethod
     def from_smiles(cls, smiles, name=''):
         mol = Chem.MolFromSmiles(smiles)
+        if name:
+            pass        
+        else:
+            name = smiles[:20]
 
         return cls(mol, name)
 
@@ -76,7 +80,7 @@ class Ligand:
 
         if make_dir:
             target = os.path.join(
-                os.getcwd(), self.type
+                os.getcwd(), self.group
             )
             os.makedirs(os.path.basename(target), exist_ok=True)
             os.chdir(target)
@@ -153,9 +157,9 @@ class Lipid(Ligand):
         self.E, self.Z = E, Z
         self.acid = acid
         if self.acid:
-            self.type = 'fatty acid'
+            self.group = 'fatty acid'
         else:
-            self.type = 'lipid'
+            self.group = 'lipid'
         self.name = str(self.len)
         if self.E:
             self.name += 'E' + ''.join([str(i) for i in self.E])
@@ -223,7 +227,7 @@ class Lea(Ligand):
     def __init__(self, r1):
 
         self.r1 = r1
-        self.type = 'LEA'
+        self.group = 'LEA'
         self.name = 'LEA' + self.r1.name
         self.mol = Chem.MolFromSmiles(self.construct())
 
@@ -258,9 +262,9 @@ class Pl(Ligand):
         self.r1 = r1
         self.r2 = r2
         if r2 == '':
-            self.type = 'lysoPl'
+            self.group = 'lysoPl'
         else:
-            self.type = 'phospholipid'
+            self.group = 'phospholipid'
 
         self.name = pattern \
                     + self.r1.name \
