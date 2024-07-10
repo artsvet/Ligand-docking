@@ -6,6 +6,13 @@ from more_itertools import consume
 from openbabel import pybel
 from pymol import cmd
 
+aa3to1={
+   'ALA':'A', 'VAL':'V', 'PHE':'F', 'PRO':'P', 'MET':'M',
+   'ILE':'I', 'LEU':'L', 'ASP':'D', 'GLU':'E', 'LYS':'K',
+   'ARG':'R', 'SER':'S', 'THR':'T', 'TYR':'Y', 'HIS':'H',
+   'CYS':'C', 'ASN':'N', 'GLN':'Q', 'TRP':'W', 'GLY':'G',
+   'MSE':'M',
+}
 
 class Multiprocess:
     """
@@ -49,16 +56,54 @@ class Protein:
 
     def __init__(self, path, name=''):
         self.path = pathlib.Path(path)
-        self.name = name
-
-    def clean(self):
-
-        if hasattr(self, 'path_clean'):
-            return self.path_clean
+        if name:
+            self.name = name
         else:
-            self.path_clean = self.path.with_name(
-                    self.path.stem + '.clean' + self.path.suffix
-                )
+            self.name = self.path.stem
+
+    @classmethod
+    def to_fasta(cls, pdb_path: str) -> dict:
+
+        ca_pattern=re.compile("^ATOM\s{2,6}\d{1,5}\s{2}CA\s[\sA]([A-Z]{3})\s([\s\w])|^HETATM\s{0,4}\d{1,5}\s{2}CA\s[\sA](MSE)\s([\s\w])")
+        chain_dict=dict()
+        chain_list=[]
+        fp=open(pdb_path,'r')
+        for line in fp.read().splitlines():
+            if line.startswith("ENDMDL"):
+                break
+            match_list=ca_pattern.findall(line)
+            if match_list:
+        
+                resn=match_list[0][0]
+                chain=match_list[0][1]
+                if chain in chain_dict:
+            
+                    chain_dict[chain]+=aa3to1[resn]
+                else:
+                    chain_dict[chain]=aa3to1[resn]
+                    chain_list.append(chain)
+        fp.close()
+
+        return chain_dict
+            
+    def clean(self):
+        
+        if hasattr(self, 'path_pdbqt'):
+
+            to_name = self.path.with_suffix('.pdbqt')
+            with open(self.path_pdbqt, "r") as f:
+                lines = f.readlines()
+            with open(to_name, "w") as f:
+                for line in lines:
+                    if line.strip("\n")[:4] == "ATOM":
+                        f.write(line)
+                f.close()
+
+            self.path = to_name
+
+        else:
+
+            self.path_clean = self.path.with_suffix('.clean.pdb')
             with open(self.path, "r") as f:
                 lines = f.readlines()
             with open(self.path_clean, "w") as f:
@@ -66,15 +111,8 @@ class Protein:
                     if line.strip("\n")[:4] == "ATOM":
                         f.write(line)
                 f.close()
-
-        os.remove(self.path)
-
-        if self.path.suffix == '.pdbqt':
-            os.rename(self.path_clean, self.path.stem + self.path.suffix)
-
-        self.path = self.path_clean
-
-        return self.path
+        
+        return self
 
     def convert(self):
 
@@ -82,34 +120,31 @@ class Protein:
             return self.path
         
         else:
-            self.path_pdbqt = self.path.with_suffix('.pdbqt')
+            self.path_pdbqt = self.path_clean.with_suffix('.pdbqt')
             cmd.load(self.path_clean)
             cmd.remove('resn HOH')
             cmd.h_add(selection='acceptors or donors')
             cmd.save(self.path_clean)
-            mols = list(pybel.readfile('pdb', self.path_clean))
+            mols = list(pybel.readfile('pdb', str(self.path_clean)))
             writer = pybel.Outputfile(
-                'pdbqt', self.path_pdbqt, opt={'pdbqt': '-xh'}
+                'pdbqt', str(self.path_pdbqt), opt={'pdbqt': '-xh'}
             )
             for molecule in mols:
                 writer.write(molecule)
                 writer.close()
             cmd.reinitialize()
+        
 
-        os.remove(self.path)
-        delattr(self, path_clean)
-        self.path = self.path_pdbqt
+        return self
 
-        return self.path
-
-    def prepare(self):
+    def prepare(self, del_files = True):
 
         if self.path.suffix == '.pdbqt':
             self.clean()
         else:
             self.clean().convert().clean()
 
-        return self.path
+        return self
 
     def __repr__(self):
 
