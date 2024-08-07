@@ -5,8 +5,11 @@ import numpy as np
 import pandas as pd
 from proteins import Multiprocess, Protein
 from ligands import PL_PATTERNS, Mol, Lipid, Lea, Pl
-from vinaDock import Docker
+from docker import Docker
 
+'''
+Deprecated table IO for VINA docking.
+'''
 
 def KD(dG, T = 310):
     """converts enthalpy to coefficient of dissociation"""
