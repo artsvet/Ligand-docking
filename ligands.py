@@ -138,8 +138,12 @@ class Ligand:
     def sdf_to_pdbqt(self) -> Path:
 
         self.pdb_path =  self.sdf_path.with_suffix('.pdb')
+<<<<<<< HEAD
         mol = Chem.SDMolSupplier(str(self.sdf_path), removeHs=False)[0]
         mol = Chem.AddHs(mol, addCoords = True) 
+=======
+        mol = Chem.SDMolSupplier(str(self.sdf_path), removeHs=False)[0] 
+>>>>>>> 311b9c63dd77cc3f7f985cb9b6ac735defe42d98
         AllChem.MolToPDBFile(mol, str(self.pdb_path))
         self.pdbqt_path = self.pdb_path.with_suffix('.pdbqt')
         atoms = list(pybel.readfile('pdb', str(self.pdb_path)))

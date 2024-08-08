@@ -11,8 +11,13 @@ from datetime import datetime
 from time import sleep
 from typing import Dict, Tuple
 
+<<<<<<< HEAD
 UNIMOL_WEIGHTS = r"C:\Users\arch\Documents\vsDock2024\Uni-Mol-main\unimol_docking_v2\interface\unimol_docking_v2_240517.pt"
 UNIMOL_INTERFACE = r"C:\Users\arch\Documents\vsDock2024\Uni-Mol-main\unimol_docking_v2\interface\demo.py"
+=======
+UNIMOL_WEIGHTS = r""
+UNIMOL_INTERFACE = r""
+>>>>>>> 311b9c63dd77cc3f7f985cb9b6ac735defe42d98
 
 
 class Docker:
