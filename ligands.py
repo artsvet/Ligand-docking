@@ -1,5 +1,7 @@
+from __future__ import annotations
 import re
 import os
+from pandas import Series
 from pathlib import Path
 from openbabel import pybel
 from rdkit import Chem
@@ -33,34 +35,46 @@ class Ligand:
     and implements interface to Rdkit and
     Openbabel to generate, convert,
     and display molecules.
+
     """
-    def __init__(self, mol, name, group = ''):
-        self.mol = mol
-        self.name = name
-        self.group = group
-        self.pdb_path = ''
-        self.pdbqt_path = ''
+    def __init__(self, mol, name, path = '', cid = ''):
 
+        self.path : Path = Path(path) if path else Path(
+            os.getcwd() + '\\' + name 
+        ) 
+        self.pdb_path = self.path if self.path.suffix == '.pdb' else ''
+        self.pdbqt_path = self.path if self.path.suffix == '.pdbqt' else ''
+        self.sdf_path = self.path if self.path.suffix == '.sdf' else ''
+        self.mol : Chem.rdchem.Mol = mol
+        self.name : str = name
+        self.cid : str = cid
+        
     @classmethod
-    def from_sdf(cls, sdf_path, name=''):
+    def from_sdf(cls, sdf_path: str, name: str = '', cid: str = ''):
+
         path = Path(sdf_path)
-        mol = Chem.SDMolSupplier(path)[0]
-        if name:
-            pass        
-        elif cid := re.search(r'CID_(\d*)', path):
-            name = cid[0]
-        else:
-            name = path.stem
+        mol = Chem.SDMolSupplier(str(path), removeHs=False)[0]      
+        if cid := re.search(r'CID_(\d*)', str(path)): cid = cid[0]
+        if not name: name = path.stem
 
-        return cls(mol, name)
+        return cls(mol, name, path=path)
+    
+    @classmethod
+    def from_pdb(cls, pdb_path: str, name: str = '', cid: str = ''):
+
+        path = Path(pdb_path)
+        mol = Chem.rdmolfiles.MolFromPDBFile(str(path), removeHs=False)[0]      
+        if cid := re.search(r'CID_(\d*)', str(path)): cid = cid[0]
+        if not name: name = path.stem
+
+        return cls(mol, name, path=path)
 
     @classmethod
-    def from_smiles(cls, smiles, name=''):
+    def from_smiles(cls, smiles: str, name: str = ''):
+
         mol = Chem.MolFromSmiles(smiles)
-        if name:
-            pass        
-        else:
-            name = smiles[:20]
+        if name: pass        
+        else: name = smiles
 
         return cls(mol, name)
 
@@ -76,39 +90,36 @@ class Ligand:
 
         return pybel.readstring('smi', self.__str__())
 
-    def write_pdb(self, make_dir=False) -> Path:
-
-        if make_dir:
-            target = os.path.join(
-                os.getcwd(), self.group
-            )
-            os.makedirs(os.path.basename(target), exist_ok=True)
-            os.chdir(target)
-        else:
-            target = os.getcwd()
+    def write_sdf(self):
 
         h = Chem.AddHs(self.mol)
-        AllChem.EmbedMolecule(h, useRandomCoords=True, boxSizeMult=3.0,
-                              maxAttempts=10000)
+        AllChem.EmbedMolecule(h, boxSizeMult=3.0, maxAttempts=10000)
+        self.sdf_path = self.path.with_suffix('.sdf')
+        Chem.rdmolfiles.SDWriter(str(self.sdf_path)).write(h)
+        
+        
+        return self.sdf_path
+    
+    def write_pdb(self) -> Path:
+
+        h = Chem.AddHs(self.mol)
+        AllChem.EmbedMolecule(
+            h, boxSizeMult=3.0, maxAttempts=10000
+        )
+
         try:
             AllChem.UFFOptimizeMolecule(h, 10000)
         except ValueError as err:
             print(err, self.name)
 
         AllChem.MolToPDBFile(h, self.name + '.pdb')
-        self.pdb_path = Path(
-            os.path.join(target, self.name + '.pdb')
-            )
+        self.pdb_path = self.path.with_suffix('.pdb')
 
         return self.pdb_path
 
     def write_pdbqt(self) -> Path:
 
-        if self.pdb_path:
-            pass
-        else:
-            self.write_pdb()
-
+        self.write_pdb()
         self.pdbqt_path = Path(
             self.pdb_path.with_suffix('.pdbqt')
             )
@@ -120,14 +131,29 @@ class Ligand:
         for atom in atoms:
             writer.write(atom)
             writer.close()
-
-        '''pybel/pymol cache needs manual cleanup'''
-        os.remove(self.pdb_path.__str__())
-        self.pdb_path = None
         cmd.reinitialize()
+        
+        return self.pdbqt_path
+    
+    def sdf_to_pdbqt(self) -> Path:
+
+        self.pdb_path =  self.sdf_path.with_suffix('.pdb')
+        mol = Chem.SDMolSupplier(str(self.sdf_path), removeHs=False)[0]
+        mol = Chem.AddHs(mol, addCoords = True) 
+        AllChem.MolToPDBFile(mol, str(self.pdb_path))
+        self.pdbqt_path = self.pdb_path.with_suffix('.pdbqt')
+        atoms = list(pybel.readfile('pdb', str(self.pdb_path)))
+        writer = pybel.Outputfile(
+            'pdbqt', str(self.pdbqt_path), overwrite=True
+        )
+        for atom in atoms:
+            writer.write(atom)
+            writer.close()
+        cmd.reinitialize()
+        
         return self.pdbqt_path
 
-    def compute_charges(self)-> list:
+    def compute_charges(self) -> list:
 
         rdPartialCharges.ComputeGasteigerCharges(self.mol)
         charges = [(atom.GetSymbol(), atom.GetDoubleProp('_GasteigerCharge'))
@@ -151,7 +177,7 @@ class Lipid(Ligand):
     ex - Lipid(8, E=[3,6]) : C/C=C/C/C=C/CC(=O)O
     """
 
-    def __init__(self, len, E=[], Z=[], acid=True):
+    def __init__(self, len: int, E: list[int] = [], Z: list[int] = [], acid=True):
 
         self.len = len
         self.E, self.Z = E, Z
@@ -166,9 +192,11 @@ class Lipid(Ligand):
         if self.Z:
             self.name += 'Z' + ''.join([str(i) for i in self.Z])
         self.mol = Chem.MolFromSmiles(self.construct())
+        super().__init__(self.mol, self.name)
+
 
     @classmethod
-    def from_series(cls, series, acid=True):
+    def from_series(cls, series: Series, acid=True):
         len = int(series['length'])
         E = [int(E)
              for E in series['E'].split(',')
@@ -181,7 +209,7 @@ class Lipid(Ligand):
         return cls(len, E=E, Z=Z, acid=acid)
 
     @classmethod
-    def from_string(cls, string, acid=True):
+    def from_string(cls, string: str, acid=True): # string shorthand, i.e. 16E6Z12
         len = int(re.match(r'\d+', string)[0])
         E = []
         Z = []
@@ -224,20 +252,21 @@ class Lea(Ligand):
     ex - Lea(Lipid(8, E=[3,6])) : C/C=C/C/C=C/CCOCC(CNC(C)C)O
     """
 
-    def __init__(self, r1):
+    def __init__(self, r1: Lipid):
 
         self.r1 = r1
         self.group = 'LEA'
         self.name = 'LEA' + self.r1.name
         self.mol = Chem.MolFromSmiles(self.construct())
+        super().__init__(self.mol, self.name)
 
     @classmethod
-    def from_series(cls, series):
+    def from_series(cls, series: pd.Series):
             r1 = Lipid.from_series(series)
             return cls(r1)
 
     @classmethod
-    def from_string(cls, string):
+    def from_string(cls, string: str):
             r1 = Lipid.from_string(string[3:])
             return cls(r1)
 
@@ -257,11 +286,11 @@ class Pl(Ligand):
     pattern backbone dict, r1, r2 lipid side chain
     """
 
-    def __init__(self, pattern, r1='', r2=''):
+    def __init__(self, pattern: str, r1: Lipid, r2: Lipid = ''):
         self.pattern = pattern
         self.r1 = r1
         self.r2 = r2
-        if r2 == '':
+        if not r2:
             self.group = 'lysoPl'
         else:
             self.group = 'phospholipid'
@@ -270,62 +299,49 @@ class Pl(Ligand):
                     + self.r1.name \
                     + self.r2.name
         self.mol = Chem.MolFromSmiles(self.construct())
+        super().__init__(self.mol, self.name)
+
 
     @classmethod
-    def from_series(cls, pattern, series, lipid_table):
-        r1 = ''
-        r2 = ''
-        if series['r1'] != '':
-            r1 = Lipid.from_series(
-                lipid_table.loc[
-                    lipid_table['id'] == series['r1']
-                    ].squeeze()
-            )
+    def from_string(cls, pattern: str, string: str):
 
-        if series['r2'] != '':
-            r2 = Lipid.from_series(
-                lipid_table.loc[
-                    lipid_table['id'] == series['r2']
-                    ].squeeze()
-            )
-
-        return cls(pattern, r1, r2)
-
-    @classmethod
-    def from_string(cls, pattern, string):
         pattern = pattern
         split = re.split('  ', string)
+
         if len(split) > 1:
             r1 = Lipid.from_string(split[0])
             r2 = Lipid.from_string(split[1])
+
         else:
             r1 = Lipid.from_string(string)
             r2 = ''
+
         return cls(pattern, r1, r2)
 
     def construct(self):
+
         if self.r2:
+
             if self.pattern == 'sm':
                 structure = self.r1.__str__()[:-1] \
                             + PL_PATTERNS[self.pattern] \
                             + self.r2.__str__()[::-1].replace(
                     'O)O=(C', 'C(=O)'
                 )
+
             else:
                 structure = self.r1.__str__() \
                     + PL_PATTERNS[self.pattern] \
                     + self.r2.__str__()[::-1].replace(
                     'O)O=(C', 'C(=O)'
                     )
-        else:
-            structure = self.r1.__str__() \
-                    + PL_PATTERNS[self.pattern]
+                
+        else: structure = self.r1.__str__() + PL_PATTERNS[self.pattern]
 
         return structure
 
     def __len__(self):
-        if self.r2:
-            return self.r1.__len__(), self.r2.__len__()
-        else:
-            return self.r1.__len__()
+
+        if self.r2: return self.r1.__len__(), self.r2.__len__()
+        else: return self.r1.__len__()
 

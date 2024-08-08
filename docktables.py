@@ -1,10 +1,10 @@
 import pandas as pd
-from vinaDock import Docker
+from docker import Docker
 
 class Dock_Report_Factory:
     def __init__(self, docks):
         self.docks = docks
-        self.all = pd.concat([dock.out for dock.out in self.docks])
+        self.all = pd.concat([dock.out for dock in self.docks])
 
     def best(self):
         best_affinities = pd.concat([row for dock in self.docks 

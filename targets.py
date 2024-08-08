@@ -54,55 +54,53 @@ class Protein:
     execution when used with Multiprocess.
     """
 
-    def __init__(self, path, name=''):
+    def __init__(self, path, name = ''):
+
         self.path = pathlib.Path(path)
-        if name:
-            self.name = name
-        else:
-            self.name = self.path.stem
+        self.pdb_path = self.path if self.path.suffix == '.pdb' else ''
+        self.pdbqt_path = self.path if self.path.suffix == '.pdbqt' else ''
+        self.name = name if name else self.path.stem
 
     @classmethod
     def to_fasta(cls, pdb_path: str) -> dict:
 
-        ca_pattern=re.compile("^ATOM\s{2,6}\d{1,5}\s{2}CA\s[\sA]([A-Z]{3})\s([\s\w])|^HETATM\s{0,4}\d{1,5}\s{2}CA\s[\sA](MSE)\s([\s\w])")
+        ca_pattern=re.compile(
+            '^ATOM\s{2,6}\d{1,5}\s{2}CA\s[\sA]([A-Z]{3})\s([\s\w])'\
+            '^HETATM\s{0,4}\d{1,5}\s{2}CA\s[\sA](MSE)\s([\s\w])')
         chain_dict=dict()
         chain_list=[]
         fp=open(pdb_path,'r')
+
         for line in fp.read().splitlines():
             if line.startswith("ENDMDL"):
                 break
             match_list=ca_pattern.findall(line)
             if match_list:
-        
                 resn=match_list[0][0]
                 chain=match_list[0][1]
                 if chain in chain_dict:
-            
                     chain_dict[chain]+=aa3to1[resn]
                 else:
                     chain_dict[chain]=aa3to1[resn]
                     chain_list.append(chain)
+
         fp.close()
 
         return chain_dict
-            
+
     def clean(self):
         
-        if hasattr(self, 'path_pdbqt'):
-
+        if self.pdbqt_path:
             to_name = self.path.with_suffix('.pdbqt')
-            with open(self.path_pdbqt, "r") as f:
+            with open(self.pdbqt_path, "r") as f:
                 lines = f.readlines()
             with open(to_name, "w") as f:
                 for line in lines:
                     if line.strip("\n")[:4] == "ATOM":
                         f.write(line)
                 f.close()
-
             self.path = to_name
-
-        else:
-
+        else:           
             self.path_clean = self.path.with_suffix('.clean.pdb')
             with open(self.path, "r") as f:
                 lines = f.readlines()
@@ -117,35 +115,34 @@ class Protein:
     def convert(self):
 
         if self.path.suffix == '.pdbqt':
-            return self.path
-        
+            return self.path        
         else:
-            self.path_pdbqt = self.path_clean.with_suffix('.pdbqt')
+            self.pdbqt_path = self.path_clean.with_suffix('.pdbqt')
             cmd.load(self.path_clean)
             cmd.remove('resn HOH')
             cmd.h_add(selection='acceptors or donors')
             cmd.save(self.path_clean)
             mols = list(pybel.readfile('pdb', str(self.path_clean)))
             writer = pybel.Outputfile(
-                'pdbqt', str(self.path_pdbqt), opt={'pdbqt': '-xh'}
+                'pdbqt', str(self.pdbqt_path), opt={'pdbqt': '-xh'}
             )
+
             for molecule in mols:
                 writer.write(molecule)
                 writer.close()
             cmd.reinitialize()
         
-
         return self
 
-    def prepare(self, del_files = True):
+    def write_pdbqt(self):
 
-        if self.path.suffix == '.pdbqt':
-            self.clean()
-        else:
-            self.clean().convert().clean()
+        self.clean().convert().clean()
+        os.remove(self.path_clean)
+        os.remove(self.pdbqt_path)
+        self.pdbqt_path = self.path
 
         return self
 
     def __repr__(self):
 
-        return self.path
+        return str(self.path)
