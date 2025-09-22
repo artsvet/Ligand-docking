@@ -6,8 +6,6 @@ from more_itertools import consume
 from openbabel import pybel
 from pymol import cmd
 
-"""Protein files are published as Protein Data Bank files (pdb)
-and require additional editing to use with autodock vina"""
 
 class Multiprocess:
     """
@@ -42,7 +40,7 @@ class Multiprocess:
 
 class Protein(type(pathlib.Path())):
     """
-    Protein class reading path
+    Protein class instantiated using path
     to .pdb, .pdbqt, or other structure file.
     Implements methods to clean and convert
     structure files, with parallel
@@ -54,49 +52,59 @@ class Protein(type(pathlib.Path())):
         super().__init__()
 
     def clean(self):
-        """Removes metadata/comments"""
 
-        self.path_clean = Protein(
-            self.with_name(
-                self.stem + '.clean' + self.suffix
+        if hasattr(self, 'path_clean'):
+            return self.path_clean
+        else:
+            self.path_clean = Protein(
+                self.with_name(
+                    self.stem + '.clean' + self.suffix
+                )
             )
-        )
-        with open(self, "r") as f:
-            lines = f.readlines()
-        with open(self.path_clean, "w") as f:
-            for line in lines:
-                if line.strip("\n")[:4] == "ATOM":
-                    f.write(line)
-            f.close()
+            setattr(self.path_clean, 'path_clean', self.path_clean)
+            with open(self, "r") as f:
+                lines = f.readlines()
+            with open(self.path_clean, "w") as f:
+                for line in lines:
+                    if line.strip("\n")[:4] == "ATOM":
+                        f.write(line)
+                f.close()
         os.remove(self)
 
         return self.path_clean
 
     def convert(self):
-        """adds Gasteiger partial charges and AutoDock atom-types with pybel"""
 
-        self.path_pdbqt = Protein(self.path_clean.with_suffix('.pdbqt'))
-        cmd.load(self.path_clean.__str__())
-        cmd.remove('resn HOH')
-        cmd.h_add(selection='acceptors or donors')
-        cmd.save(self.path_clean.__str__())
-        atoms = list(pybel.readfile('pdb', self.path_clean.__str__()))
-        writer = pybel.Outputfile(
-            'pdbqt', self.path_pdbqt.__str__(), opt={'pdbqt': '-xh'}
-        )
-        for atom in atoms:
-            writer.write(atom)
-            writer.close()
-        cmd.reinitialize()
+        if hasattr(self, 'path_pdbqt'):
+            return self.path_pdbqt
+        else:
+            self.path_pdbqt = Protein(self.with_suffix('.pdbqt'))
+            setattr(self.path_pdbqt, 'path_pdbqt', self.path_pdbqt)
+            cmd.load(self.__str__())
+            cmd.remove('resn HOH')
+            cmd.h_add(selection='acceptors or donors')
+            cmd.save(self.__str__())
+            mols = list(pybel.readfile('pdb', self.path_clean.__str__()))
+            writer = pybel.Outputfile(
+                'pdbqt', self.path_pdbqt.__str__(), opt={'pdbqt': '-xh'}
+            )
+            for molecule in mols:
+                writer.write(molecule)
+                writer.close()
+            cmd.reinitialize()
         os.remove(self)
 
         return self.path_pdbqt
 
     def prepare(self):
-        """Gets .pdb file ready for docking"""
 
-        return self.clean().convert().clean()
+        if hasattr(self, 'path_pdbqt'):
+            self.path_pdbqt.clean()
+        elif hasattr(self, 'path_clean'):
+            self.path_clean.convert().clean()
+        else:
+            self.clean().convert().clean()
 
     def __repr__(self):
 
-        return self.root
+        return self.stem

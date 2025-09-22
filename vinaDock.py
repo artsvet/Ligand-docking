@@ -11,16 +11,14 @@ class Docker:
     Outputs compiled vina rankings output as pandas dataframe.
     """
     def __init__(self, receptor, ligand, log_path,
-                 box=(0, 0, 0, 30, 30, 30), exhaustiveness=10, cpu=8, run_count=1):
+                 box=(0, 0, 0, 30, 30, 30), exhaustiveness=10, cpu=8):
         self.receptor = receptor  # prepared protein pdbqt file
         self.ligand = ligand  # ligand to dock
+        self.log_path = log_path  # vina subprocess output log.txt
         self.box = box  # search grid
-        self.log = log_path  # vina subprocess output txt
-        self.exhaustiveness = exhaustiveness
-        self.cpu = cpu
-        self.run_count = run_count  # iterations
-        self.times_ran = 0  # iterations counter
-
+        self.exhaustiveness = exhaustiveness  # vina search breadth
+        self.cpu = cpu  # number of threads
+        self.out = pd.Dataframe()
 
     def dock_args(self):
 
@@ -36,16 +34,18 @@ class Docker:
 
     def dock(self):
 
+        self.ligand.write_pdbqt()
         subprocess.run(
             self.dock_args(), shell=True
         )
+        self.out = self.scrape_log()
 
-        return self.scrape_log(self.log)
+        return self.out
 
-    def scrape_log(self, log):
+    def scrape_log(self):
 
         list_out = []
-        with open(log, 'r') as log:
+        with open(self.log_path, 'r') as log:
             for line in log:
                 m = re.match(
                     r'(\d)\s*(-\d*.\d*)\s*(\d*.\d*)\s*(\d*.\d*)',
@@ -61,16 +61,20 @@ class Docker:
                                      'Affinity': m.group(2),
                                      'Dist_rmsd_l.b.': m.group(3),
                                      'Dist_rmsd_u.b.': m.group(4)})
-        return list_out
+        return pd.DataFrame(list_out)
 
-    def run(self):
+    '''def run(self):
 
         run_outputs = []
         self.ligand.write_pdbqt()
         while self.times_ran < self.run_count:
             self.times_ran += 1
-            run_outputs.extend(self.dock())
-        delattr(self.ligand, 'pdbqt_path')
+            dock = self.dock()
+            run_outputs.extend(dock)
+            if float(dock[0]['Affinity']) > float(self.sparsity):
+                self.didBreak = 1
+                print(self.ligand.name + ' broke!')
+                break
 
-        return pd.DataFrame(run_outputs)
+        return pd.DataFrame(run_outputs)'''
 
